@@ -26,6 +26,14 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
         [Toggle(_ANIMATED_NOISE)] _EnableAnimatedJitter("Animated Noise", Float) = 0
         _JitterTexture("Jitter Texture", 2D) = "white" {}
         _JitterStrength("Jitter Strength", Float) = 2
+
+        [Header(Exclusion Volumes)]
+        [Toggle(_USE_EXCLUSION_VOLUMES)] _UseExclusionVolumes("Use Exclusion Volumes", Float) = 0
+
+        [Header(Light Volumes Integration)]
+        [Toggle(_USE_LIGHT_VOLUMES)] _UseLightVolumes("Sample Light Volumes", Float) = 0
+        [Toggle(_LIGHT_VOLUMES_ADDITIVE_ONLY)] _LightVolumesAdditiveOnly("Additive Only (Dynamic Lights)", Float) = 1
+        _LightVolumeIntensity("Light Volume Intensity", Range(0, 5)) = 1.0
     }
 
     SubShader
@@ -54,6 +62,11 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
             //Unity3d
             #include "UnityCG.cginc"
 
+            //Light Volumes Integration (for AudioLink-responsive fog)
+            #if defined(_USE_LIGHT_VOLUMES)
+                #include "Packages/red.sim.lightvolumes/Shaders/LightVolumes.cginc"
+            #endif
+
             //Custom (From Pema)
             #include "QuadIntrinsics.cginc"
 
@@ -71,6 +84,9 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
             #pragma shader_feature_local _TERMINATE_RAYS_OUTSIDE_VOLUME
             #pragma shader_feature_local _KEEP_RAYS_ONLY_IN_VOLUME
             #pragma shader_feature_local _USE_DENSITY_TEXTURE
+            #pragma shader_feature_local _USE_EXCLUSION_VOLUMES
+            #pragma shader_feature_local _USE_LIGHT_VOLUMES
+            #pragma shader_feature_local _LIGHT_VOLUMES_ADDITIVE_ONLY
 
             //NOTE: IF MIP QUAD OPTIMIZATION IS ENABLED
             //WE HAVE TO TARGET 5.0
@@ -170,6 +186,58 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
                 #define JITTER_TEXTURE _JitterTexture
                 #define VOLUME_TEXTURE _VolumeTexture
                 #define DENSITY_TEXTURE _DensityVolumeTexture
+            #endif
+
+            #if defined(_USE_LIGHT_VOLUMES)
+                fixed _LightVolumeIntensity;
+            #endif
+
+            //||||||||||||||||||||||||||||| EXCLUSION VOLUMES |||||||||||||||||||||||||||||
+            //||||||||||||||||||||||||||||| EXCLUSION VOLUMES |||||||||||||||||||||||||||||
+            //||||||||||||||||||||||||||||| EXCLUSION VOLUMES |||||||||||||||||||||||||||||
+
+            #if defined(_USE_EXCLUSION_VOLUMES)
+                #define MAX_EXCLUSION_BOXES 8
+
+                // Exclusion box data - set via Udon script
+                // Property names must start with _Udon for VRChat
+                uniform float4 _UdonExclusionBoxPositions[MAX_EXCLUSION_BOXES];  // xyz = world position
+                uniform float4 _UdonExclusionBoxSizes[MAX_EXCLUSION_BOXES];      // xyz = half-extents
+                uniform float4x4 _UdonExclusionBoxWorldToLocal[MAX_EXCLUSION_BOXES]; // For rotated boxes
+                uniform int _UdonExclusionBoxCount;
+                uniform float _UdonExclusionBoxUseRotation[MAX_EXCLUSION_BOXES];   // 0 = axis-aligned, 1 = rotated
+
+                // Check if a point is inside an axis-aligned box
+                bool IsInsideAABB(float3 worldPos, float3 boxCenter, float3 boxHalfSize)
+                {
+                    return all(abs(worldPos - boxCenter) < boxHalfSize);
+                }
+
+                // Check if a point is inside a rotated box (OBB)
+                bool IsInsideOBB(float3 worldPos, float4x4 worldToLocal, float3 boxHalfSize)
+                {
+                    float3 localPos = mul(worldToLocal, float4(worldPos, 1.0)).xyz;
+                    return all(abs(localPos) < boxHalfSize);
+                }
+
+                // Check if point is inside any exclusion volume
+                bool IsInExclusionZone(float3 worldPos)
+                {
+                    for (int i = 0; i < _UdonExclusionBoxCount && i < MAX_EXCLUSION_BOXES; i++)
+                    {
+                        if (_UdonExclusionBoxUseRotation[i] > 0)
+                        {
+                            if (IsInsideOBB(worldPos, _UdonExclusionBoxWorldToLocal[i], _UdonExclusionBoxSizes[i].xyz))
+                                return true;
+                        }
+                        else
+                        {
+                            if (IsInsideAABB(worldPos, _UdonExclusionBoxPositions[i].xyz, _UdonExclusionBoxSizes[i].xyz))
+                                return true;
+                        }
+                    }
+                    return false;
+                }
             #endif
 
             //||||||||||||||||||||||||||||| METHODS |||||||||||||||||||||||||||||
@@ -341,6 +409,16 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
                         if (isRayPositionIntersectingScene)
                     #endif
                     {
+                        // Check if we're inside an exclusion zone (skip fog accumulation if so)
+                        #if defined(_USE_EXCLUSION_VOLUMES)
+                            if (IsInExclusionZone(raymarch_currentPos))
+                            {
+                                // Skip this step - don't accumulate fog in exclusion zones
+                                raymarch_currentPos += raymarch_rayIncrement * RAYMARCH_STEP_SIZE;
+                                continue;
+                            }
+                        #endif
+
                         //And also keep going if we haven't reached the fullest density just yet.
                         //NOTE: If we go past 1 then we get a wierd effect where we can't see the underlying scene color because its fully occluded...
                         //but the depth of the scene is still crystal clear, and looks wrong.
@@ -353,6 +431,23 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
 
                             #if defined (_USE_DENSITY_TEXTURE)
                                 sampledColor.a = tex3Dlod(DENSITY_TEXTURE, fixed4(scaledPos, 0)).r;
+                            #endif
+
+                            // Sample Light Volumes at this position and tint the fog
+                            #if defined(_USE_LIGHT_VOLUMES)
+                                // Get the L0 (ambient/average) color from Light Volumes at this world position
+                                // This includes AudioLink-driven dynamic colors
+                                #if defined(_LIGHT_VOLUMES_ADDITIVE_ONLY)
+                                    // Only sample additive/dynamic lights (point lights, spot lights)
+                                    // This is better for AudioLink-responsive fog as it only captures dynamic lighting
+                                    float3 lightVolumeColor = LightVolumeAdditiveSH_L0(raymarch_currentPos);
+                                #else
+                                    // Sample all Light Volumes (baked + dynamic)
+                                    float3 lightVolumeColor = LightVolumeSH_L0(raymarch_currentPos);
+                                #endif
+
+                                // Tint the fog color by the light volume color
+                                sampledColor.rgb *= (1.0 + lightVolumeColor * _LightVolumeIntensity);
                             #endif
 
                             //accumulate the samples
@@ -387,4 +482,6 @@ Shader "BakedVolumetrics/SceneVolumetricFog"
             ENDCG
         }
     }
+
+    CustomEditor "BakedVolumetrics.Editor.SceneVolumetricFogShaderGUI"
 }

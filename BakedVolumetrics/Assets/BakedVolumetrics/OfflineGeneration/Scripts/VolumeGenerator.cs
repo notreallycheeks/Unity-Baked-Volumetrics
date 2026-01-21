@@ -281,6 +281,10 @@ namespace BakedVolumetricsOffline
                     fogSceneObject = transform.GetChild(0).gameObject;
             }
 
+            // Early return if no fog scene object exists yet
+            if (fogSceneObject == null)
+                return;
+
             if (fogMeshRenderer == null)
                 fogMeshRenderer = fogSceneObject.GetComponent<MeshRenderer>();
 

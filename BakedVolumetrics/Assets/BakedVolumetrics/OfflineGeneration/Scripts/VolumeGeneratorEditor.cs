@@ -612,7 +612,11 @@ namespace BakedVolumetricsOffline
             EditorGUILayout.Space(guiSpace);
 
             if (GUILayout.Button("Generate Volume"))
+            {
                 volumeGenerator.GenerateVolume();
+                volumeGenerator.SetupSceneObjectVolume();
+                volumeGenerator.UpdateMaterial();
+            }
 
             if (GUILayout.Button("Update Material"))
                 volumeGenerator.UpdateMaterial();

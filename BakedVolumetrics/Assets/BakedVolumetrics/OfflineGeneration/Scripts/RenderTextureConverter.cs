@@ -25,7 +25,7 @@ namespace BakedVolumetricsOffline
 
             NativeArray<byte> nativeArray = new NativeArray<byte>(renderTextureMemorySize, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture2D, 0, (request) =>
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture2D, 0, (_) =>
             {
                 convertedTexture2D = new Texture2D(width, height, renderTexture2D.graphicsFormat, generateMips ? TextureCreationFlags.MipChain : TextureCreationFlags.None);
                 convertedTexture2D.filterMode = convertedTexture2D.filterMode;
@@ -59,7 +59,7 @@ namespace BakedVolumetricsOffline
 
             NativeArray<byte> nativeArray = new NativeArray<byte>(renderTextureMemorySize, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture2D, 0, (request) =>
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture2D, 0, (_) =>
             {
                 convertedTexture2D = new Texture2D(width, height, renderTexture2D.graphicsFormat, generateMips ? TextureCreationFlags.MipChain : TextureCreationFlags.None);
                 convertedTexture2D.filterMode = convertedTexture2D.filterMode;
@@ -84,7 +84,7 @@ namespace BakedVolumetricsOffline
 
             NativeArray<byte> nativeArray = new NativeArray<byte>(renderTextureMemorySize, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture3D, 0, (request) =>
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.RequestIntoNativeArray(ref nativeArray, renderTexture3D, 0, (_) =>
             {
                 convertedTexture3D = new Texture3D(width, height, depth, renderTexture3D.graphicsFormat, generateMips ? TextureCreationFlags.MipChain : TextureCreationFlags.None);
                 convertedTexture3D.filterMode = renderTexture3D.filterMode;
